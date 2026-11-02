@@ -119,8 +119,8 @@ def search_web_ddg(query, max_results=3):
     except Exception:
         return []
 
-def ask_deepseek(user_prompt):
-    """Gọi DeepSeek AI (FreeDeepseekAPI trên localhost:9655 hoặc proxy)."""
+def ask_deepseek(user_prompt, chat_id=None, user_id=None, chat_type="private"):
+    """Gọi DeepSeek AI (FreeDeepseekAPI trên localhost:9655 với session định danh riêng cho từng user)."""
     search_context = ""
     keywords = ["kết quả", "bảng xếp hạng", "tin tức", "hôm nay", "mới nhất", "giá", "thời tiết", "tỉ số", "lịch thi đấu"]
     if any(k in user_prompt.lower() for k in keywords):
@@ -130,6 +130,12 @@ def ask_deepseek(user_prompt):
 
     prompt_content = user_prompt + search_context
 
+    # Định danh session riêng biệt cho từng người dùng / nhóm
+    if chat_type == "private" or not chat_id:
+        session_key = f"tg_dm_{user_id or 'anon'}"
+    else:
+        session_key = f"tg_grp_{abs(int(chat_id))}_u_{user_id or 'anon'}"
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt_content}
@@ -138,6 +144,7 @@ def ask_deepseek(user_prompt):
     try:
         req_data = json.dumps({
             "model": DEEPSEEK_MODEL,
+            "user": session_key,
             "messages": messages,
             "max_tokens": 1200,
             "temperature": 0.7
@@ -146,7 +153,8 @@ def ask_deepseek(user_prompt):
             f"{DEEPSEEK_BASE_URL}/chat/completions",
             data=req_data,
             headers={
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "x-agent-session": session_key
             }
         )
         with urllib.request.urlopen(cloud_req, timeout=40) as resp:
@@ -293,8 +301,11 @@ def handle_message(msg):
         send_message(chat_id, "Bạn cứ hỏi thoải mái nhé, mình đang lắng nghe đây! 😊", reply_to_message_id=msg_id)
         return
 
+    user = msg.get("from", {})
+    user_id = user.get("id") or chat_id
+
     send_chat_action(chat_id, "typing")
-    reply = ask_deepseek(clean_text)
+    reply = ask_deepseek(clean_text, chat_id=chat_id, user_id=user_id, chat_type=chat_type)
     send_message(chat_id, reply, reply_to_message_id=msg_id)
 
 def trigger_next_runner():
