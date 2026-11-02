@@ -1,0 +1,60 @@
+name: KenhLive Bot 24/7 (DeepSeek AI)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */4 * * *' # Backup watchdog mỗi 4 tiếng phòng trường hợp runner đứt đoạn
+  push:
+    branches: [main]
+
+concurrency:
+  group: kenhlive-telegram-bot-runner
+  cancel-in-progress: true
+
+jobs:
+  run-bot:
+    name: 🤖 KenhLive AI Bot 24/7
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: 📥 Tải mã nguồn Bot
+        uses: actions/checkout@v4
+
+      - name: 🐍 Cài đặt Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 🚀 Khởi chạy Bot với DeepSeek AI & Tự Động Nối Tiếp (330 Phút)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          RUN_DURATION_MINUTES: 330
+        run: |
+          python3 bot.py
+
+      - name: 🔄 Kích hoạt Runner Nối Tiếp (Fallback Relay)
+        if: always()
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          python3 -c "
+          import os, urllib.request, json
+          token = os.environ.get('GH_PAT', '').strip()
+          repo = os.environ.get('GITHUB_REPOSITORY', 'hanhk112023-jpg/kenhlive-bot')
+          if not token: exit(0)
+          url = f'https://api.github.com/repos/{repo}/actions/workflows/bot-247.yml/dispatches'
+          req = urllib.request.Request(
+              url,
+              data=json.dumps({'ref': 'main'}).encode('utf-8'),
+              headers={'Accept': 'application/vnd.github.v3+json', 'Authorization': f'token {token}', 'User-Agent': 'KenhLiveRelay'}
+          )
+          try:
+              urllib.request.urlopen(req, timeout=15)
+              print('Fallback relay dispatched successfully.')
+          except Exception as e:
+              print('Relay notice:', e)
+          "
