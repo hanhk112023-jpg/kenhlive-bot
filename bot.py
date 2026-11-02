@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-KenhLive Telegram Bot 24/7 với DeepSeek AI
-- Trả lời tin nhắn thông minh qua DeepSeek AI (DM hoặc tag/reply trong nhóm).
-- Chỉ tự động gửi file APK khi có PHIÊN BẢN MỚI được phát hành (không spam file cũ).
-- Hỗ trợ chạy liên tục 24/7 trên GitHub Actions với cơ chế tự khởi động nối tiếp (Self-Relay).
+KenhLive Telegram Bot 24/7 với FreeDeepseekAPI
+- Tích hợp FreeDeepseekAPI (mô hình deepseek-v4-flash có sẵn Web Search miễn phí).
+- Phong cách trò chuyện tự nhiên, thân thiện như một người bạn / support am hiểu.
+- Hoạt động mượt mà cả trong Chat riêng (DM) lẫn trong Nhóm (Tag, Reply, Lệnh /ai, /hoi).
+- Chỉ tự động phát sóng file APK khi có PHIÊN BẢN MỚI phát hành (chống spam).
+- Vận hành liên tục 24/7 trên GitHub Actions với cơ chế Self-Relay nối tiếp.
 """
 
 import os
@@ -16,6 +18,8 @@ import urllib.request
 import urllib.parse
 import threading
 import subprocess
+import re
+import html
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,9 +32,8 @@ VERSION_FILE = os.path.join(BASE_DIR, "last_version.txt")
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 DEFAULT_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "-1004461944549").strip()
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://literouter.fun/v1").strip()
-DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4.1-flash-1017").strip()
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "http://127.0.0.1:9655/v1").strip()
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash").strip()
 VERSION_URL = os.environ.get("VERSION_CHECK_URL", "https://kenhlive-dl.htuananh153.workers.dev/version").strip()
 APK_URL = os.environ.get("APK_DOWNLOAD_URL", "https://kenhlive-dl.htuananh153.workers.dev/apk").strip()
 GH_PAT = os.environ.get("GH_PAT", "").strip()
@@ -38,34 +41,34 @@ REPO = os.environ.get("GITHUB_REPOSITORY", "hanhk112023-jpg/kenhlive-bot").strip
 RUN_DURATION = int(os.environ.get("RUN_DURATION_MINUTES", "0"))
 
 if not BOT_TOKEN:
-    # Thử nạp từ config.json nếu có
     cfg_path = os.path.join(BASE_DIR, "config.json")
     if os.path.exists(cfg_path):
         try:
             with open(cfg_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
                 BOT_TOKEN = cfg.get("bot_token", "")
-                if not DEEPSEEK_API_KEY:
-                    DEEPSEEK_API_KEY = cfg.get("deepseek_api_key", "")
         except Exception:
             pass
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 BOT_USERNAME = "KenhLiveTv_bot"
 
-SYSTEM_PROMPT = """Bạn là trợ lý AI thông minh chính thức của ứng dụng KenhLive (KenhLive TV & KenhLive iOS).
-Nhiệm vụ của bạn:
-1. Giải đáp thắc mắc về ứng dụng KenhLive:
-   - Thể thao trực tiếp 4 nhà đài: Socolive TV, ColaTV, Gà Vàng 33, Giờ Vàng TV (đầy đủ các giải Ngoại Hạng Anh, C1, La Liga, Serie A, V-League...).
-   - Kho phim truyện KKPhim với hơn 33.000 phim thuyết minh/vietsub chuẩn 4K, hỗ trợ lưu lịch sử và xem tiếp.
-   - Hướng dẫn cài đặt trên Android TV, Google TV, Android Box, Smart TV và iOS.
-2. Link tải APK trực tiếp vĩnh viễn (luôn là bản mới nhất): https://kenhlive-dl.htuananh153.workers.dev/apk
-3. Cách cập nhật: Trong app chọn Cài đặt ➔ Kiểm tra cập nhật ➔ TẢI NGAY.
-4. Phong cách trả lời: Thân thiện, ngắn gọn, súc tích, định dạng gạch đầu dòng rõ ràng, dùng tiếng Việt chuẩn."""
+SYSTEM_PROMPT = """Bạn là một người bạn thông minh, thân thiện và là trợ lý hỗ trợ kỹ thuật nhiệt tình, am hiểu sâu rộng về công nghệ, thể thao, bóng đá và đời sống.
+
+Tính cách & phong cách phản hồi:
+1. Giao tiếp tự nhiên, gần gũi, hóm hỉnh và chân thành như một người bạn thân hoặc support chu đáo.
+2. Trả lời thẳng vào trọng tâm câu hỏi của người dùng (dù là hỏi về học tập, code, bóng đá quốc tế, tin tức, tâm sự hay chém gió).
+3. TUYỆT ĐỐI KHÔNG tự tiện chèn quảng cáo hoặc cố ép nhắc đến 'KenhLive' nếu người dùng không hỏi. Không lặp đi lặp lại những câu chào máy móc.
+4. CHỈ KHI người dùng hỏi về: xem trực tiếp bóng đá ở đâu, link xem phim, app KenhLive bị lỗi gì, link tải app APK, hoặc cách cài đặt trên TV:
+   - Lúc này mới nhiệt tình hỗ trợ và giới thiệu chi tiết như một người support có tâm.
+   - KenhLive có 4 nhà đài thể thao (Socolive, ColaTV, Gà Vàng, Giờ Vàng) và kho phim KKPhim 33k phim.
+   - Link tải APK trực tiếp vĩnh viễn: https://kenhlive-dl.htuananh153.workers.dev/apk
+   - Cập nhật trong app: Cài đặt -> Kiểm tra cập nhật.
+5. Định dạng văn bản gọn gàng, dùng gạch đầu dòng rõ ràng, ngắt dòng thoáng, dễ đọc trên điện thoại."""
 
 def tg_request(method, payload=None):
     url = f"{TELEGRAM_API}/{method}"
-    headers = {"User-Agent": "KenhLiveBot/1.0"}
+    headers = {"User-Agent": "KenhLiveBot/2.0"}
     data = None
     if payload:
         data = json.dumps(payload).encode("utf-8")
@@ -90,37 +93,71 @@ def send_message(chat_id, text, reply_to_message_id=None, parse_mode="HTML"):
     }
     if reply_to_message_id:
         payload["reply_to_message_id"] = reply_to_message_id
-    return tg_request("sendMessage", payload)
+    res = tg_request("sendMessage", payload)
+    if not res or not res.get("ok"):
+        payload["parse_mode"] = None
+        res = tg_request("sendMessage", payload)
+    return res
+
+def search_web_ddg(query, max_results=3):
+    """Tìm kiếm web nhanh qua DuckDuckGo để bổ sung thông tin thời gian thực."""
+    url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            raw = r.read().decode("utf-8", errors="ignore")
+            snippets = re.findall(r'<a[^>]+class=[\"\']result__snippet[\"\'][^>]*>(.*?)</a>', raw, re.DOTALL)
+            results = []
+            for s in snippets[:max_results]:
+                clean = re.sub(r'<[^>]+>', '', s).strip()
+                clean = html.unescape(clean)
+                if clean:
+                    results.append(clean)
+            return results
+    except Exception:
+        return []
 
 def ask_deepseek(user_prompt):
+    """Gọi DeepSeek AI (FreeDeepseekAPI trên localhost:9655 hoặc proxy)."""
+    search_context = ""
+    keywords = ["kết quả", "bảng xếp hạng", "tin tức", "hôm nay", "mới nhất", "giá", "thời tiết", "tỉ số", "lịch thi đấu"]
+    if any(k in user_prompt.lower() for k in keywords):
+        snippets = search_web_ddg(user_prompt, max_results=3)
+        if snippets:
+            search_context = "\n\n[Dữ liệu tra cứu web thời gian thực]:\n" + "\n".join(f"- {s}" for s in snippets)
+
+    prompt_content = user_prompt + search_context
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt}
+        {"role": "user", "content": prompt_content}
     ]
+
     try:
         req_data = json.dumps({
             "model": DEEPSEEK_MODEL,
             "messages": messages,
-            "max_tokens": 650,
+            "max_tokens": 1200,
             "temperature": 0.7
         }).encode("utf-8")
         cloud_req = urllib.request.Request(
             f"{DEEPSEEK_BASE_URL}/chat/completions",
             data=req_data,
             headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+                "Content-Type": "application/json"
             }
         )
-        with urllib.request.urlopen(cloud_req, timeout=30) as resp:
+        with urllib.request.urlopen(cloud_req, timeout=40) as resp:
             res = json.loads(resp.read().decode("utf-8"))
             ans = res.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
             if ans:
                 return ans
     except Exception as e:
-        logging.error(f"DeepSeek API error: {e}")
+        logging.error(f"FreeDeepseekAPI error ({DEEPSEEK_BASE_URL}): {e}")
 
-    return "Dạ hiện tại AI DeepSeek đang bận xử lý, bạn vui lòng thử lại sau chút xíu nhé! Bạn có thể tải ngay app KenhLive bản mới nhất tại: https://kenhlive-dl.htuananh153.workers.dev/apk"
+    return "Chào bạn! Hiện tại kết nối AI đang được kết nối lại trong giây lát. Nếu bạn cần tải app KenhLive mới nhất hoặc cần trợ giúp gấp, bạn có thể bấm /link hoặc hỏi lại mình sau 1 phút nhé!"
 
 def get_last_sent_version():
     if os.path.exists(VERSION_FILE):
@@ -150,12 +187,11 @@ def check_and_broadcast_new_apk():
 
         last_sent = get_last_sent_version()
         if last_sent == latest_tag:
-            return  # Đã gửi bản này rồi, không gửi lặp lại!
+            return
 
         logging.info(f"Phát hiện phiên bản mới: {latest_tag} (Bản cũ đã gửi: {last_sent}). Tải và phát sóng APK...")
         temp_apk = os.path.join(BASE_DIR, f"KenhLive-{latest_tag}.apk")
         
-        # Tải file APK mới
         dl_req = urllib.request.Request(APK_URL, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(dl_req, timeout=60) as dl_resp:
             with open(temp_apk, "wb") as f:
@@ -211,84 +247,89 @@ def handle_message(msg):
 
     is_private = (chat_type == "private")
     reply_to = msg.get("reply_to_message", {})
-    is_reply_to_bot = reply_to.get("from", {}).get("username") == BOT_USERNAME
+    reply_from = reply_to.get("from", {})
+    is_reply_to_bot = (reply_from.get("username") == BOT_USERNAME or reply_from.get("is_bot") and reply_from.get("id") == 9036540834)
     is_mentioned = f"@{BOT_USERNAME}".lower() in text.lower()
     is_command = text.startswith("/")
 
     if not (is_private or is_reply_to_bot or is_mentioned or is_command):
         return
 
-    clean_text = text.replace(f"@{BOT_USERNAME}", "").strip()
+    logging.info(f"Tin nhắn từ [{chat_id}] ({chat_type}): {text}")
 
-    if clean_text.startswith("/start") or clean_text.startswith("/help"):
-        intro = (
-            "👋 <b>Xin chào bạn! Mình là Bot Trợ Lý KenhLive TV</b> 🤖\n\n"
-            "✨ <b>Tích hợp DeepSeek AI</b> hỗ trợ 24/7 mọi thắc mắc về:\n"
-            "• ⚽ Xem trực tiếp 4 nhà đài: Socolive, ColaTV, Gà Vàng 33, Giờ Vàng TV\n"
-            "• 🎬 Kho phim truyện KKPhim hơn 33.000 phim chuẩn 4K\n"
-            "• 📺 Hướng dẫn cài đặt và tối ưu Android TV, TV Box & iOS\n\n"
-            "📥 <b>Lệnh nhanh:</b>\n"
-            "• /apk hoặc /link : Lấy link tải bản APK mới nhất\n"
-            "• Cứ chat hoặc tag @KenhLiveTv_bot trong nhóm để trò chuyện cùng DeepSeek AI nhé!"
+    clean_text = text
+    clean_text = re.sub(rf"@{BOT_USERNAME}\b", "", clean_text, flags=re.IGNORECASE).strip()
+
+    lower_text = clean_text.lower()
+    if lower_text.startswith("/start"):
+        welcome = (
+            "Chào bạn! 👋 Mình là trợ lý AI thông minh.\n\n"
+            "Bạn có thể trò chuyện với mình về bất kỳ chủ đề gì: bóng đá, tin tức, công nghệ hay đời sống.\n\n"
+            "📌 <b>Một số lệnh tiện ích:</b>\n"
+            "• /link hoặc /apk - Lấy link tải KenhLive TV mới nhất\n"
+            "• /ai [câu hỏi] - Hỏi đáp nhanh cùng AI (trong nhóm hoặc DM)\n"
+            "• Trong nhóm: Tag @KenhLiveTv_bot hoặc Trả lời (Reply) tin nhắn của mình để trò chuyện nhé!"
         )
-        send_message(chat_id, intro, reply_to_message_id=msg_id)
+        send_message(chat_id, welcome, reply_to_message_id=msg_id)
         return
 
-    if clean_text.startswith("/apk") or clean_text.startswith("/link") or clean_text.startswith("/capnhat"):
-        try:
-            req = urllib.request.Request(VERSION_URL, headers={"User-Agent": "KenhLiveBot"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            tag = data.get("tag", "v7.8.0")
-        except Exception:
-            tag = "Mới nhất"
-
-        apk_msg = (
-            f"🚀 <b>KENHLIVE TV ({tag}) — BẢN CẬP NHẬT MỚI NHẤT</b>\n\n"
-            f"🔗 <b>Link tải APK trực tiếp:</b>\n"
-            f"👉 https://kenhlive-dl.htuananh153.workers.dev/apk\n\n"
-            f"💡 <b>Cập nhật trên Android TV / Box:</b>\n"
-            f"1. Vào mục <b>Cài đặt</b> trên thanh điều hướng bên trái\n"
-            f"2. Chọn <b>Kiểm tra cập nhật</b> ➔ Bấm <b>TẢI NGAY</b>\n"
-            f"3. Ứng dụng tự động tải ngầm và mở cài đặt đè giữ nguyên dữ liệu."
+    if lower_text.startswith("/apk") or lower_text.startswith("/link") or "xin link" in lower_text or "tải app" in lower_text:
+        msg_out = (
+            "🚀 <b>TẢI ỨNG DỤNG KENHLIVE TV:</b>\n\n"
+            "• <b>Link tải trực tiếp APK (bản mới nhất):</b>\n"
+            "👉 https://kenhlive-dl.htuananh153.workers.dev/apk\n\n"
+            "• <b>Tự động cập nhật:</b> Trên ứng dụng, vào <b>Cài đặt ➔ Kiểm tra cập nhật ➔ TẢI NGAY</b>.\n\n"
+            "<i>(Hỗ trợ mượt mà trên tất cả Android TV, Smart TV, Google TV và TV Box)</i>"
         )
-        send_message(chat_id, apk_msg, reply_to_message_id=msg_id)
+        send_message(chat_id, msg_out, reply_to_message_id=msg_id)
         return
 
-    # Chat thông minh với DeepSeek AI
+    for cmd_prefix in ["/ai", "/hoi", "/chat", "/search"]:
+        if clean_text.lower().startswith(cmd_prefix):
+            clean_text = clean_text[len(cmd_prefix):].strip()
+            break
+
+    if not clean_text:
+        send_message(chat_id, "Bạn cứ hỏi thoải mái nhé, mình đang lắng nghe đây! 😊", reply_to_message_id=msg_id)
+        return
+
     send_chat_action(chat_id, "typing")
-    prompt = clean_text.lstrip("/ask").lstrip("/ai").strip()
-    if not prompt:
-        prompt = "Xin chào! Bạn có thể giúp gì cho mình về KenhLive?"
-
-    reply = ask_deepseek(prompt)
-    send_message(chat_id, reply, reply_to_message_id=msg_id, parse_mode="Markdown")
+    reply = ask_deepseek(clean_text)
+    send_message(chat_id, reply, reply_to_message_id=msg_id)
 
 def trigger_next_runner():
-    """Tự động kích hoạt GitHub Actions runner tiếp theo trước khi runner hiện tại hết giờ."""
-    if not GH_PAT:
-        logging.warning("Không có GH_PAT, không thể tự động trigger runner tiếp theo.")
+    """Tự động kích hoạt GitHub Actions runner mới trước khi hết 330 phút."""
+    if not GH_PAT or not REPO:
+        logging.warning("Không có GH_PAT hoặc REPO để kích hoạt self-relay.")
         return
+
+    logging.info("Chuẩn bị kích hoạt GitHub Actions runner mới để duy trì 24/7...")
+    url = f"https://api.github.com/repos/{REPO}/actions/workflows/bot-247.yml/dispatches"
+    data = json.dumps({"ref": "main"}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Accept": "application/vnd.github.v3+json",
+            "Authorization": f"token {GH_PAT}",
+            "User-Agent": "KenhLive-Relay"
+        }
+    )
     try:
-        url = f"https://api.github.com/repos/{REPO}/actions/workflows/bot-247.yml/dispatches"
-        req_data = json.dumps({"ref": "main"}).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=req_data,
-            headers={
-                "Accept": "application/vnd.github.v3+json",
-                "Authorization": f"token {GH_PAT}",
-                "User-Agent": "KenhLiveRelay"
-            }
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            logging.info(f"Relay trigger runner tiếp theo thành công (Status: {resp.status})")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            if resp.status in (200, 204):
+                logging.info("Đã kích hoạt thành công runner mới! Bàn giao tiếp nối an toàn.")
+            else:
+                logging.warning(f"Self-relay response code: {resp.status}")
     except Exception as e:
-        logging.error(f"Lỗi khi trigger runner tiếp theo: {e}")
+        logging.error(f"Lỗi khi kích hoạt self-relay: {e}")
 
 def main():
-    logging.info(f"Khởi động KenhLive Telegram Bot (@{BOT_USERNAME})...")
-    
+    logging.info("==========================================")
+    logging.info("  KenhLive Bot 24/7 với FreeDeepseekAPI   ")
+    logging.info("==========================================")
+    logging.info(f"DeepSeek Base URL: {DEEPSEEK_BASE_URL} (Model: {DEEPSEEK_MODEL})")
+
     # Khởi tạo bản ghim ban đầu để không gửi lại bản cũ
     try:
         req = urllib.request.Request(VERSION_URL, headers={"User-Agent": "KenhLiveBot"})
@@ -301,19 +342,16 @@ def main():
     except Exception as e:
         logging.warning(f"Không thể lấy tag ban đầu: {e}")
 
-    # Bật watcher theo dõi phiên bản mới
     watcher = threading.Thread(target=version_watcher_loop, daemon=True)
     watcher.start()
 
-    # Bỏ qua backlog cũ
     tg_request("getUpdates", {"offset": -1, "timeout": 1})
 
     offset = 0
     start_time = time.time()
-    logging.info("Bot đang trực tuyến 24/7 và sẵn sàng chat DeepSeek AI!")
+    logging.info("Bot đang trực tuyến 24/7 và sẵn sàng hỗ trợ!")
 
     while True:
-        # Kiểm tra nếu chạy trên GitHub Actions runner và sắp đạt giới hạn thời gian (ví dụ 340 phút)
         if RUN_DURATION > 0:
             elapsed_minutes = (time.time() - start_time) / 60.0
             if elapsed_minutes >= RUN_DURATION:

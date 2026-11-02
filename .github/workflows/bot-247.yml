@@ -1,4 +1,4 @@
-name: KenhLive Bot 24/7 (DeepSeek AI)
+name: KenhLive Bot 24/7 (FreeDeepseekAPI)
 
 on:
   workflow_dispatch:
@@ -26,11 +26,31 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: 🚀 Khởi chạy Bot với DeepSeek AI & Tự Động Nối Tiếp (330 Phút)
+      - name: 🟢 Cài đặt Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 📦 Cài đặt & Khởi động FreeDeepseekAPI (Local Proxy)
+        run: |
+          echo "Cloning FreeDeepseekAPI..."
+          git clone https://github.com/dekrezz/FreeDeepseekAPI.git FreeDeepseekAPI
+          cd FreeDeepseekAPI
+          if [ -n "${{ secrets.DEEPSEEK_AUTH_JSON }}" ]; then
+            echo '${{ secrets.DEEPSEEK_AUTH_JSON }}' > deepseek-auth.json
+            echo "Starting FreeDeepseekAPI server in background..."
+            NON_INTERACTIVE=1 node server.js &
+            sleep 4
+          else
+            echo "Notice: DEEPSEEK_AUTH_JSON secret is not configured yet."
+          fi
+
+      - name: 🚀 Khởi chạy Bot Telegram với DeepSeek AI & Tự Động Nối Tiếp (330 Phút)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: "http://127.0.0.1:9655/v1"
+          DEEPSEEK_MODEL: "deepseek-v4-flash"
           GH_PAT: ${{ secrets.GH_PAT }}
           RUN_DURATION_MINUTES: 330
         run: |
