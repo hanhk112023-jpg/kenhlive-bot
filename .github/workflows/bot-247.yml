@@ -31,29 +31,35 @@ jobs:
         with:
           node-version: 20
 
-      - name: 📦 Cài đặt & Khởi động FreeDeepseekAPI (Local Proxy)
+      - name: 📦 Chuẩn bị FreeDeepseekAPI
         run: |
-          echo "Cloning FreeDeepseekAPI..."
-          git clone https://github.com/dekrezz/FreeDeepseekAPI.git FreeDeepseekAPI
-          cd FreeDeepseekAPI
-          if [ -n "${{ secrets.DEEPSEEK_AUTH_JSON }}" ]; then
-            echo '${{ secrets.DEEPSEEK_AUTH_JSON }}' > deepseek-auth.json
-            echo "Starting FreeDeepseekAPI server in background..."
-            NON_INTERACTIVE=1 node server.js &
-            sleep 4
-          else
-            echo "Notice: DEEPSEEK_AUTH_JSON secret is not configured yet."
+          if [ ! -d "FreeDeepseekAPI" ]; then
+            git clone https://github.com/dekrezz/FreeDeepseekAPI.git FreeDeepseekAPI
           fi
 
-      - name: 🚀 Khởi chạy Bot Telegram với DeepSeek AI & Tự Động Nối Tiếp (330 Phút)
+      - name: 🚀 Khởi chạy FreeDeepseekAPI & Telegram Bot (330 Phút)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DEEPSEEK_AUTH_JSON: ${{ secrets.DEEPSEEK_AUTH_JSON }}
           DEEPSEEK_BASE_URL: "http://127.0.0.1:9655/v1"
           DEEPSEEK_MODEL: "deepseek-v4-flash"
           GH_PAT: ${{ secrets.GH_PAT }}
           RUN_DURATION_MINUTES: 330
         run: |
+          # Khởi động FreeDeepseekAPI ngầm trong cùng step
+          if [ -n "$DEEPSEEK_AUTH_JSON" ]; then
+            echo "$DEEPSEEK_AUTH_JSON" > FreeDeepseekAPI/deepseek-auth.json
+            echo "Starting FreeDeepseekAPI proxy..."
+            (cd FreeDeepseekAPI && NON_INTERACTIVE=1 node server.js) &
+            sleep 4
+            curl -s http://127.0.0.1:9655/health || true
+            echo ""
+          else
+            echo "Warning: DEEPSEEK_AUTH_JSON is empty!"
+          fi
+
+          # Chạy Bot Telegram
           python3 bot.py
 
       - name: 🔄 Kích hoạt Runner Nối Tiếp (Fallback Relay)
